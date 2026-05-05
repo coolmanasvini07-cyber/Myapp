@@ -1,0 +1,89 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  buildConfiguration: 'Release'
+
+stages:
+
+# ---------------- BUILD ----------------
+- stage: Build
+  jobs:
+  - job: BuildJob
+    steps:
+    - task: UseDotNet@2
+      inputs:
+        packageType: 'sdk'
+        version: '8.x'
+
+    - script: dotnet restore
+      displayName: 'Restore Packages'
+
+    - script: dotnet build --configuration $(buildConfiguration)
+      displayName: 'Build Project'
+
+    - script: dotnet publish -c $(buildConfiguration) -o $(Build.ArtifactStagingDirectory)
+      displayName: 'Publish Artifact'
+
+    - publish: $(Build.ArtifactStagingDirectory)
+      artifact: drop
+
+# ---------------- DEV DEPLOY ----------------
+- stage: Dev
+  dependsOn: Build
+  jobs:
+  - deployment: DevDeploy
+    environment: dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+
+          - task: AzureWebApp@1
+            inputs:
+              azureSubscription: 'dotnet-web-connection'
+              appName: 'asp-dev-manasvini'
+              package: '$(Pipeline.Workspace)/drop'
+
+# ---------------- STAGING ----------------
+- stage: Staging
+  dependsOn: Dev
+  jobs:
+  - deployment: StagingDeploy
+    environment: staging
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+
+          - task: AzureWebApp@1
+            inputs:
+              azureSubscription: 'dotnet-web-connection'
+              appName: 'asp-stg-manasvini'
+              package: '$(Pipeline.Workspace)/drop'
+
+# ---------------- PROD ----------------
+- stage: Prod
+  dependsOn: Staging
+  jobs:
+  - deployment: ProdDeploy
+    environment: prod
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+
+          - task: AzureWebApp@1
+            inputs:
+              azureSubscription: 'dotnet-web-connection'
+              appName: 'asp-prod-manasvini'
+              package: '$(Pipeline.Workspace)/drop'
